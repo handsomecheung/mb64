@@ -7,27 +7,31 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"math"
 )
 
-var debug = false
 var gcm cipher.AEAD
-var mbEncoding = base64.StdEncoding
+var mbEncoding *base64.Encoding
+var bypass = false
+
+func Bypass() {
+	bypass = true
+
+	mbEncoding = base64.StdEncoding
+}
 
 func SetEncoding(key string) error {
 	if key == "" {
-		if debug {
-			fmt.Println("WARNING: EMPTY KEY!!!")
-		}
-	} else {
-		err := setGCM(key)
-		if err != nil {
-			return err
-		}
-
-		mbEncoding = base64.NewEncoding(shuffleBaseChars(key))
+		return errors.New("key cannot be empty")
 	}
+
+	err := setGCM(key)
+	if err != nil {
+		return err
+	}
+
+	mbEncoding = base64.NewEncoding(shuffleBaseChars(key))
+	bypass = false
 
 	return nil
 }
@@ -84,10 +88,7 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 }
 
 func encrypt(data []byte) ([]byte, error) {
-	if gcm == nil {
-		if debug {
-			fmt.Println("WARNING: not encrypt since EMPTY KEY!!!")
-		}
+	if bypass {
 		return data, nil
 	}
 
@@ -100,10 +101,7 @@ func encrypt(data []byte) ([]byte, error) {
 }
 
 func decrypt(data []byte) ([]byte, error) {
-	if gcm == nil {
-		if debug {
-			fmt.Println("WARNING: not decrypt since EMPTY KEY!!!")
-		}
+	if bypass {
 		return data, nil
 	}
 

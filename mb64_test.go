@@ -74,9 +74,7 @@ func checkContinuity(t *testing.T, chars string) {
 	}
 }
 
-func TestWithoutSetKey(t *testing.T) {
-	debug = true
-
+func testWithoutSetEncoding(t *testing.T) {
 	content := "hello world"
 
 	encoded, err_e := Encode([]byte(content))
@@ -98,12 +96,21 @@ func TestWithoutSetKey(t *testing.T) {
 	}
 }
 
-func TestEmptyKey(t *testing.T) {
-	debug = true
+func TestBypass(t *testing.T) {
+	Bypass()
+	testWithoutSetEncoding(t)
+}
 
-	err_s := SetEncoding("")
-	checkErr(t, err_s)
-	TestWithoutSetKey(t)
+func TestSetEncodingAndBypass(t *testing.T) {
+	err := SetEncoding("notuse")
+	checkErr(t, err)
+	Bypass()
+	testWithoutSetEncoding(t)
+}
+
+func TestBypassAndSetEncoding(t *testing.T) {
+	Bypass()
+	TestEncodeAndDecode(t)
 }
 
 func TestEncodeAndDecode(t *testing.T) {
