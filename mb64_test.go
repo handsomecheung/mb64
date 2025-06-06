@@ -92,6 +92,25 @@ func TestEncodeAndDecode(t *testing.T) {
 	}
 }
 
+func TestEncodeAndDecodeCJK(t *testing.T) {
+	key := "abcdefg"
+	err_s := SetEncoding(key)
+	checkErr(t, err_s)
+
+	content := "こんにちは、世界。GO"
+
+	encoded, err_e := Encode([]byte(content))
+	checkErr(t, err_e)
+
+	bytes, err_d := Decode(encoded)
+	checkErr(t, err_d)
+
+	content1 := string(bytes)
+	if content1 != content {
+		t.Errorf("`%s` != `%s`", content1, content)
+	}
+}
+
 func TestEncryptAndDecrypt(t *testing.T) {
 	key := "abcdefg"
 	err_s := SetEncoding(key)
