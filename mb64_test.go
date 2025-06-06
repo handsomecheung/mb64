@@ -1,6 +1,7 @@
 package mb64
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -71,6 +72,38 @@ func checkContinuity(t *testing.T, chars string) {
 		}
 		lastChar = c
 	}
+}
+
+func TestWithoutSetKey(t *testing.T) {
+	debug = true
+
+	content := "hello world"
+
+	encoded, err_e := Encode([]byte(content))
+	checkErr(t, err_e)
+
+	bytes, err_d := Decode(encoded)
+	checkErr(t, err_d)
+
+	content1 := string(bytes)
+	if content1 != content {
+		t.Errorf("`%s` != `%s`", content1, content)
+	}
+
+	bytes_b64, err_b64 := base64.StdEncoding.DecodeString(string(encoded))
+	checkErr(t, err_b64)
+	string_b64 := string(bytes_b64)
+	if string_b64 != content {
+		t.Errorf("base64 content `%s` != `%s`", string_b64, content)
+	}
+}
+
+func TestEmptyKey(t *testing.T) {
+	debug = true
+
+	err_s := SetEncoding("")
+	checkErr(t, err_s)
+	TestWithoutSetKey(t)
 }
 
 func TestEncodeAndDecode(t *testing.T) {

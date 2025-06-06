@@ -7,23 +7,27 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"math"
 )
 
+var debug = false
 var gcm cipher.AEAD
-var mbEncoding *base64.Encoding
+var mbEncoding = base64.StdEncoding
 
 func SetEncoding(key string) error {
 	if key == "" {
-		return errors.New("key cannot be empty")
-	}
+		if debug {
+			fmt.Println("WARNING: EMPTY KEY!!!")
+		}
+	} else {
+		err := setGCM(key)
+		if err != nil {
+			return err
+		}
 
-	err := setGCM(key)
-	if err != nil {
-		return err
+		mbEncoding = base64.NewEncoding(shuffleBaseChars(key))
 	}
-
-	mbEncoding = base64.NewEncoding(shuffleBaseChars(key))
 
 	return nil
 }
@@ -53,8 +57,8 @@ func Decode(data []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
-func setGCM(font string) error {
-	key := generateKey(font)
+func setGCM(basekey string) error {
+	key := generateKey(basekey)
 	var err error
 	gcm, err = newGCM(key)
 	if err != nil {
@@ -80,6 +84,13 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 }
 
 func encrypt(data []byte) ([]byte, error) {
+	if gcm == nil {
+		if debug {
+			fmt.Println("WARNING: not encrypt since EMPTY KEY!!!")
+		}
+		return data, nil
+	}
+
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
@@ -89,6 +100,13 @@ func encrypt(data []byte) ([]byte, error) {
 }
 
 func decrypt(data []byte) ([]byte, error) {
+	if gcm == nil {
+		if debug {
+			fmt.Println("WARNING: not decrypt since EMPTY KEY!!!")
+		}
+		return data, nil
+	}
+
 	if len(data) < gcm.NonceSize() {
 		return nil, errors.New("ciphertext too short")
 	}
