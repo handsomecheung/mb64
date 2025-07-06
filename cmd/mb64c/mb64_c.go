@@ -1,8 +1,13 @@
 package main
 
+/*
+#include <stdlib.h>
+#include <string.h>
+*/
 import "C"
 import (
 	"unsafe"
+
 	"github.com/handsomecheung/mb64"
 )
 

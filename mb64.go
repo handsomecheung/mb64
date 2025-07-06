@@ -8,19 +8,26 @@ import (
 	"encoding/base64"
 	"errors"
 	"math"
+	"sync"
 )
 
+var mu sync.RWMutex
 var gcm cipher.AEAD
 var mbEncoding *base64.Encoding
 var bypass = false
 
 func Bypass() {
-	bypass = true
+	mu.Lock()
+	defer mu.Unlock()
 
+	bypass = true
 	mbEncoding = base64.StdEncoding
 }
 
 func SetEncoding(key string) error {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if key == "" {
 		return errors.New("key cannot be empty")
 	}
