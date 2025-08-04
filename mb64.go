@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
+	"time"
 )
 
 var mu sync.RWMutex
@@ -24,13 +26,15 @@ func Bypass() {
 	mbEncoding = base64.StdEncoding
 }
 
-func SetEncoding(key string) error {
+func SetEncoding(basekey string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if key == "" {
+	if basekey == "" {
 		return errors.New("key cannot be empty")
 	}
+
+	key := generateKey(basekey)
 
 	err := setGCM(key)
 	if err != nil {
@@ -68,8 +72,7 @@ func Decode(data []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
-func setGCM(basekey string) error {
-	key := generateKey(basekey)
+func setGCM(key []byte) error {
 	var err error
 	gcm, err = newGCM(key)
 	if err != nil {
@@ -78,11 +81,15 @@ func setGCM(basekey string) error {
 	return nil
 }
 
-// generateKey generates a 32-byte key from any input string.
-// It uses SHA-256 to ensure the output is always 32 bytes.
-// The same input will always produce the same output.
 func generateKey(input string) []byte {
-	hash := sha256.Sum256([]byte(input))
+	date := "" + time.Now().Format("20060102")
+	// TODO remove me
+	fmt.Printf("current date: [%s]\n", date)
+
+	// generateKey generates a 32-byte key from any input string.
+	// It uses SHA-256 to ensure the output is always 32 bytes.
+	// The same input will always produce the same output.
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%s%s", input, date)))
 	return hash[:]
 }
 
@@ -124,8 +131,8 @@ func decrypt(data []byte) ([]byte, error) {
 
 var b64BaseChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-func shuffleBaseChars(key string) string {
-	b64 := base64.StdEncoding.EncodeToString([]byte(key))
+func shuffleBaseChars(key []byte) string {
+	b64 := base64.StdEncoding.EncodeToString(key)
 	numbers := charsToNumbers(b64)
 	return shuffleStr(b64BaseChars, numbers)
 }

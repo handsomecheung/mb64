@@ -17,11 +17,12 @@ function Bypass() {
   };
 }
 
-function SetEncoding(key) {
-  if (key === "") {
+function SetEncoding(basekey) {
+  if (basekey === "") {
     throw new Error("key cannot be empty");
   }
 
+  const key = generateKey(basekey);
   setGCM(key);
   mbEncoding = createCustomBase64Encoding(shuffleBaseChars(key));
   bypass = false;
@@ -51,13 +52,21 @@ function RenderOutFile(key, filepath, output) {
   fs.writeFileSync(output, decoded);
 }
 
-function setGCM(basekey) {
-  const key = generateKey(basekey);
-  gcm = { key };
+function setGCM(key) {
+  gcm = key;
 }
 
 function generateKey(input) {
-  return crypto.createHash("sha256").update(input, "utf8").digest();
+  const date = getCurrentDate();
+  return crypto.createHash("sha256").update(`${input}${date}`, "utf8").digest();
+}
+
+function getCurrentDate() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
 function encrypt(data) {
@@ -66,7 +75,7 @@ function encrypt(data) {
   }
 
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", gcm.key, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", gcm, iv);
 
   let encrypted = cipher.update(data);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
@@ -89,7 +98,7 @@ function decrypt(data) {
   const authTag = data.slice(12, 28);
   const encrypted = data.slice(28);
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", gcm.key, iv);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", gcm, iv);
   decipher.setAuthTag(authTag);
 
   let decrypted = decipher.update(encrypted);

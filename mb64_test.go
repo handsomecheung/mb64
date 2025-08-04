@@ -177,8 +177,9 @@ func TestEncryptAndDecrypt(t *testing.T) {
 }
 
 func TestShuffle(t *testing.T) {
-	keys := []string{" ", "a", "abcd1234#$%"}
-	for _, key := range keys {
+	basekeys := []string{" ", "a", "abcd1234#$%"}
+	for _, basekey := range basekeys {
+		key := generateKey(basekey)
 		chars := shuffleBaseChars(key)
 		fmt.Println(chars)
 	}
@@ -186,9 +187,10 @@ func TestShuffle(t *testing.T) {
 
 func TestIdempotence(t *testing.T) {
 	for i := range make([]int, 100) {
-		key := genRandomString(i + 1)
-		fmt.Println("TestIdempotence with key: ", key)
+		basekey := genRandomString(i + 1)
+		fmt.Println("TestIdempotence with basekey: ", basekey)
 
+		key := generateKey(basekey)
 		chars := shuffleBaseChars(key)
 
 		for _ = range make([]int, 200) {
@@ -202,10 +204,11 @@ func TestIdempotence(t *testing.T) {
 
 func TestCorrectness(t *testing.T) {
 	for i := range [100]struct{}{} {
-		key := genRandomString(i + 1)
-		fmt.Println("TestCorrectness with key: ", key)
+		basekey := genRandomString(i + 1)
+		fmt.Println("TestCorrectness with basekey: ", basekey)
 
 		for range [200]struct{}{} {
+			key := generateKey(basekey)
 			chars := shuffleBaseChars(key)
 			checkCorrectness(t, chars)
 		}
@@ -214,10 +217,11 @@ func TestCorrectness(t *testing.T) {
 
 func TestContinuity(t *testing.T) {
 	for i := range [100]struct{}{} {
-		key := genRandomString(i + 1)
-		fmt.Println("TestContinuity with key: ", key)
+		basekey := genRandomString(i + 1)
+		fmt.Println("TestContinuity with basekey: ", basekey)
 
 		for range [200]struct{}{} {
+			key := generateKey(basekey)
 			chars := shuffleBaseChars(key)
 			checkContinuity(t, chars)
 		}
