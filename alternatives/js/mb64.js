@@ -74,14 +74,15 @@ function encrypt(data) {
     return data;
   }
 
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", gcm, iv);
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", gcm, nonce);
 
   let encrypted = cipher.update(data);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   const authTag = cipher.getAuthTag();
 
-  return Buffer.concat([iv, authTag, encrypted]);
+  // Match Go's gcm.Seal format: nonce + encrypted + authTag
+  return Buffer.concat([nonce, encrypted, authTag]);
 }
 
 function decrypt(data) {
@@ -90,15 +91,16 @@ function decrypt(data) {
   }
 
   if (data.length < 28) {
-    // 12 (IV) + 16 (auth tag) minimum
+    // 12 (nonce) + 16 (auth tag) minimum
     throw new Error("ciphertext too short");
   }
 
-  const iv = data.slice(0, 12);
-  const authTag = data.slice(12, 28);
-  const encrypted = data.slice(28);
+  // Match Go's gcm.Open format: nonce + encrypted + authTag
+  const nonce = data.slice(0, 12);
+  const encrypted = data.slice(12, -16);
+  const authTag = data.slice(-16);
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", gcm, iv);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", gcm, nonce);
   decipher.setAuthTag(authTag);
 
   let decrypted = decipher.update(encrypted);
