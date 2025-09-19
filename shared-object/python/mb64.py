@@ -6,7 +6,7 @@ import os
 
 class MB64:
     def __init__(self):
-        self.lib_path = os.path.join(os.path.dirname(__file__), "build", "libmb64.so")
+        self.lib_path = os.path.join(os.path.dirname(__file__), "..", "..", "build", "libmb64.so")
         self.lib = ctypes.CDLL(self.lib_path)
 
         self.lib.SetEncodingC.argtypes = [ctypes.c_char_p]
