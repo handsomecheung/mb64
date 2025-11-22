@@ -1,6 +1,7 @@
 package mb64
 
 import (
+	"container/list"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -17,6 +18,64 @@ var mu sync.RWMutex
 var gcm cipher.AEAD
 var mbEncoding *base64.Encoding
 var bypass = false
+var baseKey string
+
+type lruCache struct {
+	mu       sync.RWMutex
+	capacity int
+	cache    map[string]*list.Element
+	lruList  *list.List
+}
+
+type cacheEntry struct {
+	key   string
+	value interface{}
+}
+
+func newLRUCache(capacity int) *lruCache {
+	return &lruCache{
+		capacity: capacity,
+		cache:    make(map[string]*list.Element),
+		lruList:  list.New(),
+	}
+}
+
+func (c *lruCache) get(key string) (interface{}, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if elem, ok := c.cache[key]; ok {
+		c.lruList.MoveToFront(elem)
+		return elem.Value.(*cacheEntry).value, true
+	}
+	return nil, false
+}
+
+func (c *lruCache) put(key string, value interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.cache[key]; ok {
+		c.lruList.MoveToFront(elem)
+		elem.Value.(*cacheEntry).value = value
+		return
+	}
+
+	entry := &cacheEntry{key: key, value: value}
+	elem := c.lruList.PushFront(entry)
+	c.cache[key] = elem
+
+	if c.lruList.Len() > c.capacity {
+		oldest := c.lruList.Back()
+		if oldest != nil {
+			c.lruList.Remove(oldest)
+			delete(c.cache, oldest.Value.(*cacheEntry).key)
+		}
+	}
+}
+
+var sha256Cache = newLRUCache(100)
+var gcmCache = newLRUCache(100)
 
 func Bypass() {
 	mu.Lock()
@@ -34,14 +93,8 @@ func SetEncoding(basekey string) error {
 		return errors.New("key cannot be empty")
 	}
 
-	key := generateKey(basekey)
-
-	err := setGCM(key)
-	if err != nil {
-		return err
-	}
-
-	mbEncoding = base64.NewEncoding(shuffleBaseChars(key))
+	baseKey = basekey
+	mbEncoding = base64.NewEncoding(shuffleBaseChars(generateKeyB64(basekey)))
 	bypass = false
 
 	return nil
@@ -81,29 +134,58 @@ func setGCM(key []byte) error {
 	return nil
 }
 
-func generateKey(input string) []byte {
-	date := "" + time.Now().Format("20060102")
-	// TODO remove me
-	fmt.Printf("current date: [%s]\n", date)
-
-	// generateKey generates a 32-byte key from any input string.
-	// It uses SHA-256 to ensure the output is always 32 bytes.
-	// The same input will always produce the same output.
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%s%s", input, date)))
-	return hash[:]
-}
-
 func newGCM(key []byte) (cipher.AEAD, error) {
+	cacheKey := string(key)
+
+	if cached, ok := gcmCache.get(cacheKey); ok {
+		return cached.(cipher.AEAD), nil
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	return cipher.NewGCM(block)
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	gcmCache.put(cacheKey, gcm)
+
+	return gcm, nil
+}
+
+func generateSha256(input string) []byte {
+	if cached, ok := sha256Cache.get(input); ok {
+		return cached.([]byte)
+	}
+
+	hash := sha256.Sum256([]byte(input))
+	result := hash[:]
+
+	sha256Cache.put(input, result)
+
+	return result
+}
+
+func generateKeyB64(input string) []byte {
+	return generateSha256(input)
+}
+
+func generateKeyGCM(input string) []byte {
+	date := time.Now().Format("20060102")
+	return generateSha256(fmt.Sprintf("%s%s", input, date))
 }
 
 func encrypt(data []byte) ([]byte, error) {
 	if bypass {
 		return data, nil
+	}
+
+	err := setGCM(generateKeyGCM(baseKey))
+	if err != nil {
+		return nil, err
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
@@ -117,6 +199,11 @@ func encrypt(data []byte) ([]byte, error) {
 func decrypt(data []byte) ([]byte, error) {
 	if bypass {
 		return data, nil
+	}
+
+	err := setGCM(generateKeyGCM(baseKey))
+	if err != nil {
+		return nil, err
 	}
 
 	if len(data) < gcm.NonceSize() {

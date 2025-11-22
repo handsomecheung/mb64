@@ -179,7 +179,7 @@ func TestEncryptAndDecrypt(t *testing.T) {
 func TestShuffle(t *testing.T) {
 	basekeys := []string{" ", "a", "abcd1234#$%"}
 	for _, basekey := range basekeys {
-		key := generateKey(basekey)
+		key := generateKeyB64(basekey)
 		chars := shuffleBaseChars(key)
 		fmt.Println(chars)
 	}
@@ -190,7 +190,7 @@ func TestIdempotence(t *testing.T) {
 		basekey := genRandomString(i + 1)
 		fmt.Println("TestIdempotence with basekey: ", basekey)
 
-		key := generateKey(basekey)
+		key := generateKeyB64(basekey)
 		chars := shuffleBaseChars(key)
 
 		for _ = range make([]int, 200) {
@@ -208,7 +208,7 @@ func TestCorrectness(t *testing.T) {
 		fmt.Println("TestCorrectness with basekey: ", basekey)
 
 		for range [200]struct{}{} {
-			key := generateKey(basekey)
+			key := generateKeyB64(basekey)
 			chars := shuffleBaseChars(key)
 			checkCorrectness(t, chars)
 		}
@@ -221,7 +221,7 @@ func TestContinuity(t *testing.T) {
 		fmt.Println("TestContinuity with basekey: ", basekey)
 
 		for range [200]struct{}{} {
-			key := generateKey(basekey)
+			key := generateKeyB64(basekey)
 			chars := shuffleBaseChars(key)
 			checkContinuity(t, chars)
 		}
