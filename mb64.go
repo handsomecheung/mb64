@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings" // New import
 	"sync"
 	"time"
 )
@@ -265,16 +266,17 @@ func charsToNumbers(chars string) []int {
 func shuffleStr(str string, numbers []int) string {
 	res := str
 	for _, number := range numbers {
-		_res := ""
-		_str := res
-		for len(_str) > 0 {
-			powResult := (number + len(_str)) * int(math.Abs(float64(number-len(_str))))
-			index := powResult % len(_str)
-			_res += string(_str[index])
-			_str = _str[:index] + _str[index+1:]
+		var b strings.Builder
+		runesToShuffle := []rune(res)
+
+		for len(runesToShuffle) > 0 {
+			powResult := (number + len(runesToShuffle)) * int(math.Abs(float64(number-len(runesToShuffle))))
+			index := powResult % len(runesToShuffle)
+
+			b.WriteRune(runesToShuffle[index])
+			runesToShuffle = append(runesToShuffle[:index], runesToShuffle[index+1:]...)
 		}
-		_res = reverse(_res)
-		res = _res
+		res = reverse(b.String())
 	}
 	return res
 }
