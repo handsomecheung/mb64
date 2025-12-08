@@ -227,3 +227,118 @@ func TestContinuity(t *testing.T) {
 		}
 	}
 }
+
+func TestShuffleStrARX(t *testing.T) {
+	testCases := []struct {
+		name    string
+		input   string
+		numbers []int
+	}{
+		{
+			name:    "Base64 alphabet",
+			input:   b64BaseChars,
+			numbers: []int{1, 2, 3, 4, 5},
+		},
+		{
+			name:    "Short string",
+			input:   "ABCDEFGH",
+			numbers: []int{42, 123, 456},
+		},
+		{
+			name:    "Single number",
+			input:   "0123456789",
+			numbers: []int{999},
+		},
+		{
+			name:    "Many rounds",
+			input:   "ABCDEFGHIJKLMNOP",
+			numbers: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			shuffled := shuffleStr(tc.input, tc.numbers)
+
+			if len(shuffled) != len(tc.input) {
+				t.Errorf("Length mismatch: got %d, want %d", len(shuffled), len(tc.input))
+			}
+
+			inputRunes := []rune(tc.input)
+			shuffledRunes := []rune(shuffled)
+			charCount := make(map[rune]int)
+
+			for _, r := range inputRunes {
+				charCount[r]++
+			}
+			for _, r := range shuffledRunes {
+				charCount[r]--
+			}
+			for char, count := range charCount {
+				if count != 0 {
+					t.Errorf("Character count mismatch for '%c': %d", char, count)
+				}
+			}
+
+			if shuffled == tc.input && len(tc.input) > 1 {
+				t.Errorf("String not shuffled: %s", shuffled)
+			}
+
+			t.Logf("Input:    %s", tc.input)
+			t.Logf("Shuffled: %s", shuffled)
+		})
+	}
+}
+
+func TestShuffleStrDeterministic(t *testing.T) {
+	input := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	numbers := []int{123, 456, 789}
+
+	// Should produce same result with same inputs
+	result1 := shuffleStr(input, numbers)
+	result2 := shuffleStr(input, numbers)
+
+	if result1 != result2 {
+		t.Errorf("Non-deterministic results:\n%s\n%s", result1, result2)
+	}
+
+	// Different numbers should produce different results
+	numbers2 := []int{123, 456, 790}
+	result3 := shuffleStr(input, numbers2)
+
+	if result1 == result3 {
+		t.Errorf("Different seeds produced same result")
+	}
+
+	t.Logf("Seed 1 result: %s", result1)
+	t.Logf("Seed 2 result: %s", result3)
+}
+
+func TestShuffleStrEdgeCases(t *testing.T) {
+	if result := shuffleStr("", []int{1, 2, 3}); result != "" {
+		t.Errorf("Empty string: got %s, want empty", result)
+	}
+
+	// Single character
+	if result := shuffleStr("A", []int{1, 2, 3}); result != "A" {
+		t.Errorf("Single char: got %s, want A", result)
+	}
+
+	// Empty numbers array
+	input := "ABCDEF"
+	result := shuffleStr(input, []int{})
+	if len(result) != len(input) {
+		t.Errorf("Empty numbers: length mismatch")
+	}
+}
+
+// Benchmark to compare performance
+func BenchmarkShuffleStrARX(b *testing.B) {
+	input := b64BaseChars
+	numbers := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		shuffleStr(input, numbers)
+	}
+}

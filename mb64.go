@@ -9,8 +9,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math"
-	"strings" // New import
 	"sync"
 	"time"
 )
@@ -241,14 +239,6 @@ func sum(numbers []int) int {
 	return total
 }
 
-func reverse(s string) string {
-	runes := []rune(s)
-	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-		runes[i], runes[j] = runes[j], runes[i]
-	}
-	return string(runes)
-}
-
 var baseCharsMap = genCharMap(b64BaseChars)
 
 func charsToNumbers(chars string) []int {
@@ -263,20 +253,81 @@ func charsToNumbers(chars string) []int {
 	return numbers
 }
 
-func shuffleStr(str string, numbers []int) string {
-	res := str
-	for _, number := range numbers {
-		var b strings.Builder
-		runesToShuffle := []rune(res)
+// quarterRound performs a ChaCha20-inspired ARX (Add-Rotate-XOR) operation
+// on four 32-bit unsigned integers to provide strong diffusion
+func quarterRound(a, b, c, d uint32) (uint32, uint32, uint32, uint32) {
+	a += b
+	d ^= a
+	d = (d << 16) | (d >> 16)
 
-		for len(runesToShuffle) > 0 {
-			powResult := (number + len(runesToShuffle)) * int(math.Abs(float64(number-len(runesToShuffle))))
-			index := powResult % len(runesToShuffle)
+	c += d
+	b ^= c
+	b = (b << 12) | (b >> 20)
 
-			b.WriteRune(runesToShuffle[index])
-			runesToShuffle = append(runesToShuffle[:index], runesToShuffle[index+1:]...)
-		}
-		res = reverse(b.String())
+	a += b
+	d ^= a
+	d = (d << 8) | (d >> 24)
+
+	c += d
+	b ^= c
+	b = (b << 7) | (b >> 25)
+
+	return a, b, c, d
+}
+
+// arxPRNG generates pseudo-random numbers using ARX operations
+// Similar to ChaCha20's core but simplified for shuffling
+func arxPRNG(state *[4]uint32, rounds int) uint32 {
+	a, b, c, d := state[0], state[1], state[2], state[3]
+
+	for i := 0; i < rounds; i++ {
+		a, b, c, d = quarterRound(a, b, c, d)
 	}
-	return res
+
+	state[0] = a
+	state[1] = b
+	state[2] = c
+	state[3] = d
+
+	return a ^ b ^ c ^ d
+}
+
+func shuffleStr(str string, numbers []int) string {
+	if len(str) <= 1 {
+		return str
+	}
+
+	runes := []rune(str)
+	n := len(runes)
+
+	var state [4]uint32
+	for i := 0; i < 4; i++ {
+		if i < len(numbers) {
+			state[i] = uint32(numbers[i])
+		} else {
+			// Use constants from ChaCha20 initial state
+			constants := [4]uint32{0x61707865, 0x3320646e, 0x79622d32, 0x6b206574}
+			state[i] = constants[i]
+		}
+	}
+
+	minRounds := 10
+	if len(numbers) > minRounds {
+		minRounds = len(numbers)
+	}
+
+	for round := 0; round < minRounds; round++ {
+		for i := n - 1; i > 0; i-- {
+			randVal := arxPRNG(&state, 4) // 4 quarter-rounds per index
+			j := int(randVal % uint32(i+1))
+
+			runes[i], runes[j] = runes[j], runes[i]
+		}
+
+		if round < len(numbers) {
+			state[round%4] ^= uint32(numbers[round])
+		}
+	}
+
+	return string(runes)
 }

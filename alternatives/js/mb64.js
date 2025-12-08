@@ -1,7 +1,6 @@
 import crypto from "crypto";
 import fs from "fs";
 
-let gcm = null;
 let mbEncoding = null;
 let bypass = false;
 let baseKey = "";
@@ -17,7 +16,6 @@ class LRUCache {
       return null;
     }
     const value = this.cache.get(key);
-    // Move to end (most recently used)
     this.cache.delete(key);
     this.cache.set(key, value);
     return value;
@@ -27,7 +25,6 @@ class LRUCache {
     if (this.cache.has(key)) {
       this.cache.delete(key);
     } else if (this.cache.size >= this.capacity) {
-      // Remove least recently used (first item)
       const firstKey = this.cache.keys().next().value;
       this.cache.delete(firstKey);
     }
@@ -192,10 +189,6 @@ function sum(numbers) {
   return numbers.reduce((total, n) => total + n, 0);
 }
 
-function reverse(s) {
-  return s.split("").reverse().join("");
-}
-
 function charsToNumbers(chars) {
   const numbers = [];
   for (const c of chars) {
@@ -208,21 +201,84 @@ function charsToNumbers(chars) {
   return numbers;
 }
 
-function shuffleStr(str, numbers) {
-  let res = str;
-  for (const number of numbers) {
-    let _res = "";
-    let _str = res;
-    while (_str.length > 0) {
-      const powResult = (number + _str.length) * Math.abs(number - _str.length);
-      const index = powResult % _str.length;
-      _res += _str[index];
-      _str = _str.slice(0, index) + _str.slice(index + 1);
-    }
-    _res = reverse(_res);
-    res = _res;
+function quarterRound(a, b, c, d) {
+  a = a >>> 0;
+  b = b >>> 0;
+  c = c >>> 0;
+  d = d >>> 0;
+
+  a = (a + b) >>> 0;
+  d = (d ^ a) >>> 0;
+  d = ((d << 16) | (d >>> 16)) >>> 0;
+
+  c = (c + d) >>> 0;
+  b = (b ^ c) >>> 0;
+  b = ((b << 12) | (b >>> 20)) >>> 0;
+
+  a = (a + b) >>> 0;
+  d = (d ^ a) >>> 0;
+  d = ((d << 8) | (d >>> 24)) >>> 0;
+
+  c = (c + d) >>> 0;
+  b = (b ^ c) >>> 0;
+  b = ((b << 7) | (b >>> 25)) >>> 0;
+
+  return [a, b, c, d];
+}
+
+function arxPRNG(state, rounds) {
+  let [a, b, c, d] = state;
+
+  for (let i = 0; i < rounds; i++) {
+    [a, b, c, d] = quarterRound(a, b, c, d);
   }
-  return res;
+
+  state[0] = a;
+  state[1] = b;
+  state[2] = c;
+  state[3] = d;
+
+  return (a ^ b ^ c ^ d) >>> 0;
+}
+
+function shuffleStr(str, numbers) {
+  if (str.length <= 1) {
+    return str;
+  }
+
+  const chars = str.split("");
+  const n = chars.length;
+
+  const state = [0, 0, 0, 0];
+  const constants = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
+
+  for (let i = 0; i < 4; i++) {
+    if (i < numbers.length) {
+      state[i] = numbers[i] >>> 0;
+    } else {
+      state[i] = constants[i];
+    }
+  }
+
+  let minRounds = 10;
+  if (numbers.length > minRounds) {
+    minRounds = numbers.length;
+  }
+
+  for (let round = 0; round < minRounds; round++) {
+    for (let i = n - 1; i > 0; i--) {
+      const randVal = arxPRNG(state, 4);
+      const j = randVal % (i + 1);
+
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+
+    if (round < numbers.length) {
+      state[round % 4] = (state[round % 4] ^ numbers[round]) >>> 0;
+    }
+  }
+
+  return chars.join("");
 }
 
 function createCustomBase64Encoding(alphabet) {
