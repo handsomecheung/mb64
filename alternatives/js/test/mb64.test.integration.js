@@ -7,7 +7,19 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const GO_BINARY_PATH = path.join(__dirname, "../../../build/mb64");
+const PROJECT_ROOT = path.join(__dirname, "../../..");
+const GO_BINARY_PATH = path.join(PROJECT_ROOT, "build/mb64");
+
+function buildGoBinary() {
+  console.log("Building latest Go binary...");
+
+  execSync(`bash build-mb64.sh`, {
+    cwd: PROJECT_ROOT,
+    stdio: "inherit",
+  });
+
+  console.log("✓ Go binary built successfully\n");
+}
 
 function testGoEncodeAndJSDecode() {
   console.log("  Running test: Go binary [encode] -> JS lib [decode]");
@@ -53,6 +65,8 @@ function testJSEncodeAndGoDecode() {
 }
 
 console.log("\nRunning mb64.js cross-language integration tests ...\n");
+
+buildGoBinary();
 
 try {
   testGoEncodeAndJSDecode();
