@@ -7,11 +7,21 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 )
+
+var (
+	ErrExpired          = errors.New("data has expired")
+	ErrInvalidTimestamp = errors.New("invalid timestamp")
+	ErrDataTooShort     = errors.New("ciphertext too short")
+)
+
+// DefaultMaxClockSkew defines the maximum allowed future time drift.
+const DefaultMaxClockSkew = 60 * time.Second
 
 var mu sync.RWMutex
 var gcm cipher.AEAD
@@ -99,8 +109,14 @@ func SetEncoding(basekey string) error {
 	return nil
 }
 
+// Encode encodes data with the current timestamp.
 func Encode(data []byte) ([]byte, error) {
-	encrypted, err := encrypt(data)
+	return EncodeWithTime(data, time.Now())
+}
+
+// EncodeWithTime encodes data with a specified creation timestamp.
+func EncodeWithTime(data []byte, t time.Time) ([]byte, error) {
+	encrypted, err := encryptWithTime(data, t)
 	if err != nil {
 		return nil, err
 	}
@@ -110,13 +126,59 @@ func Encode(data []byte) ([]byte, error) {
 	return buf, nil
 }
 
+// Decode decodes data without TTL expiration check.
 func Decode(data []byte) ([]byte, error) {
+	return DecodeWithTTL(data, 0)
+}
+
+// DecodeWithTTL decodes data and verifies that it was created within ttl.
+// If ttl <= 0, expiration is not checked.
+func DecodeWithTTL(data []byte, ttl time.Duration) ([]byte, error) {
+	if bypass {
+		dbuf := make([]byte, len(data))
+		n, err := mbEncoding.Decode(dbuf, data)
+		if err != nil {
+			return nil, err
+		}
+		return dbuf[:n], nil
+	}
+
+	// Step 1: Preliminary check - decode first 8 Base64 chars to extract 4-byte timestamp (0 heap alloc)
+	if len(data) < 8 {
+		return nil, ErrDataTooShort
+	}
+
+	var headerBuf [6]byte
+	hn, err := mbEncoding.Decode(headerBuf[:], data[:8])
+	if err != nil {
+		return nil, err
+	}
+	if hn < 4 {
+		return nil, ErrDataTooShort
+	}
+
+	ts := int64(binary.BigEndian.Uint32(headerBuf[:4]))
+	now := time.Now().Unix()
+	age := now - ts
+
+	// Step 2: Validate timestamp range before full decode and decryption
+	if ttl > 0 {
+		if age > int64(ttl.Seconds()) {
+			return nil, ErrExpired
+		}
+		if age < -int64(DefaultMaxClockSkew.Seconds()) {
+			return nil, ErrInvalidTimestamp
+		}
+	}
+
+	// Step 3: Full Base64 decode
 	dbuf := make([]byte, len(data))
-	n, err := mbEncoding.Decode(dbuf, []byte(data))
+	n, err := mbEncoding.Decode(dbuf, data)
 	if err != nil {
 		return nil, err
 	}
 
+	// Step 4: AES-GCM decryption & auth tag validation
 	decrypted, err := decrypt(dbuf[:n])
 	if err != nil {
 		return nil, err
@@ -173,11 +235,14 @@ func generateKeyB64(input string) []byte {
 }
 
 func generateKeyGCM(input string) []byte {
-	date := time.Now().Format("20060102")
-	return generateSha256(fmt.Sprintf("%s%s", input, date))
+	return generateSha256(fmt.Sprintf("gcm:%s", input))
 }
 
 func encrypt(data []byte) ([]byte, error) {
+	return encryptWithTime(data, time.Now())
+}
+
+func encryptWithTime(data []byte, t time.Time) ([]byte, error) {
 	if bypass {
 		return data, nil
 	}
@@ -188,7 +253,10 @@ func encrypt(data []byte) ([]byte, error) {
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	// Embed 4-byte unix timestamp into the first 4 bytes of Nonce
+	binary.BigEndian.PutUint32(nonce[:4], uint32(t.Unix()))
+	// Fill the remaining 8 bytes with cryptographically secure random bytes
+	if _, err := rand.Read(nonce[4:]); err != nil {
 		return nil, err
 	}
 
@@ -205,8 +273,8 @@ func decrypt(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	if len(data) < gcm.NonceSize() {
-		return nil, errors.New("ciphertext too short")
+	if len(data) < gcm.NonceSize()+16 {
+		return nil, ErrDataTooShort
 	}
 
 	nonce := data[:gcm.NonceSize()]

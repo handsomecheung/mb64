@@ -12,6 +12,7 @@ import (
 func main() {
 	keyFlag := flag.String("key", "", "The key for encoding/decoding")
 	outputFile := flag.String("output", "", "Output file path (optional, defaults to stdout)")
+	ttlFlag := flag.Duration("ttl", 0, "Time-to-live for decrypting (e.g. 30s, 5m, 1h). Default is 0 (no expiration check)")
 	flag.Parse()
 
 	actualKey := *keyFlag
@@ -26,7 +27,7 @@ func main() {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: mb64 --key <key> [encrypt|decrypt] [content] --output <file>")
+		fmt.Fprintln(os.Stderr, "Usage: mb64 --key <key> [--ttl <duration>] [encrypt|decrypt] [content] --output <file>")
 		os.Exit(1)
 	}
 
@@ -52,7 +53,11 @@ func main() {
 	case "encrypt":
 		result, err = mb64.Encode(content)
 	case "decrypt":
-		result, err = mb64.Decode(content)
+		if *ttlFlag > 0 {
+			result, err = mb64.DecodeWithTTL(content, *ttlFlag)
+		} else {
+			result, err = mb64.Decode(content)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Error: Unknown command '%s'. Must be 'encrypt' or 'decrypt'.\n", command)
 		os.Exit(1)

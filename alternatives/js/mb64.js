@@ -59,12 +59,50 @@ function SetEncoding(basekey) {
 }
 
 function Encode(data) {
-  const encrypted = encrypt(data);
+  return EncodeWithTime(data, Math.floor(Date.now() / 1000));
+}
+
+function EncodeWithTime(data, unixSeconds) {
+  const encrypted = encryptWithTime(data, unixSeconds);
   return Buffer.from(mbEncoding.encode(encrypted));
 }
 
 function Decode(data) {
-  const decoded = mbEncoding.decode(data.toString().trim());
+  return DecodeWithTTL(data, 0);
+}
+
+function DecodeWithTTL(data, ttlSeconds = 0) {
+  if (bypass) {
+    return mbEncoding.decode(data.toString().trim());
+  }
+
+  const str = data.toString().trim();
+  if (str.length < 8) {
+    throw new Error("ciphertext too short");
+  }
+
+  // Step 1: Pre-decode first 8 characters to extract 4-byte timestamp
+  const headerBuf = mbEncoding.decode(str.slice(0, 8));
+  if (headerBuf.length < 4) {
+    throw new Error("ciphertext too short");
+  }
+
+  const ts = headerBuf.readUInt32BE(0);
+  const now = Math.floor(Date.now() / 1000);
+  const age = now - ts;
+
+  // Step 2: Validate timestamp range before full decode & decryption
+  if (ttlSeconds > 0) {
+    if (age > ttlSeconds) {
+      throw new Error("data has expired");
+    }
+    if (age < -60) {
+      throw new Error("invalid timestamp");
+    }
+  }
+
+  // Step 3: Full Base64 decode
+  const decoded = mbEncoding.decode(str);
   return decrypt(decoded);
 }
 
@@ -100,16 +138,7 @@ function generateKeyB64(input) {
 }
 
 function generateKeyGCM(input) {
-  const date = getCurrentDate();
-  return generateSha256(`${input}${date}`);
-}
-
-function getCurrentDate() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-  return `${year}${month}${day}`;
+  return generateSha256(`gcm:${input}`);
 }
 
 function createGCM(key) {
@@ -126,6 +155,10 @@ function createGCM(key) {
 }
 
 function encrypt(data) {
+  return encryptWithTime(data, Math.floor(Date.now() / 1000));
+}
+
+function encryptWithTime(data, unixSeconds) {
   if (bypass) {
     return data;
   }
@@ -133,10 +166,14 @@ function encrypt(data) {
   const key = generateKeyGCM(baseKey);
   const cachedKey = createGCM(key);
 
-  const nonce = crypto.randomBytes(12);
+  const nonce = Buffer.alloc(12);
+  nonce.writeUInt32BE(unixSeconds >>> 0, 0);
+  crypto.randomFillSync(nonce, 4, 8);
+
   const cipher = crypto.createCipheriv("aes-256-gcm", cachedKey, nonce);
 
-  let encrypted = cipher.update(data);
+  const rawData = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  let encrypted = cipher.update(rawData);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   const authTag = cipher.getAuthTag();
 
@@ -338,4 +375,13 @@ function createCustomBase64Encoding(alphabet) {
   return { encode, decode };
 }
 
-export { Bypass, SetEncoding, Encode, Decode, RenderInFile, RenderOutFile };
+export {
+  Bypass,
+  SetEncoding,
+  Encode,
+  EncodeWithTime,
+  Decode,
+  DecodeWithTTL,
+  RenderInFile,
+  RenderOutFile,
+};

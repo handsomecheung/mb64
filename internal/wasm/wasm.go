@@ -5,6 +5,7 @@ package wasm
 
 import (
 	"syscall/js"
+	"time"
 
 	"github.com/handsomecheung/mb64"
 )
@@ -52,12 +53,21 @@ func RegisterWasmFunctions() {
 		}),
 
 		"renderOut": js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			if len(args) != 1 {
-				return js.ValueOf("error: expected 1 argument")
+			if len(args) < 1 {
+				return js.ValueOf("error: expected at least 1 argument")
 			}
 
 			input := args[0].String()
-			decoded, err := mb64.Decode([]byte(input))
+			var decoded []byte
+			var err error
+
+			if len(args) > 1 && !args[1].IsUndefined() && !args[1].IsNull() {
+				ttlSeconds := args[1].Int()
+				decoded, err = mb64.DecodeWithTTL([]byte(input), time.Duration(ttlSeconds)*time.Second)
+			} else {
+				decoded, err = mb64.Decode([]byte(input))
+			}
+
 			if err != nil {
 				return js.ValueOf("error: " + err.Error())
 			}

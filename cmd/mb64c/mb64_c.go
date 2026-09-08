@@ -6,6 +6,7 @@ package main
 */
 import "C"
 import (
+	"time"
 	"unsafe"
 
 	"github.com/handsomecheung/mb64"
@@ -43,6 +44,19 @@ func EncodeC(data *C.char, dataLen C.int, result **C.char, resultLen *C.int) C.i
 func DecodeC(data *C.char, dataLen C.int, result **C.char, resultLen *C.int) C.int {
 	goData := C.GoBytes(unsafe.Pointer(data), dataLen)
 	decoded, err := mb64.Decode(goData)
+	if err != nil {
+		return -1
+	}
+
+	*result = C.CString(string(decoded))
+	*resultLen = C.int(len(decoded))
+	return 0
+}
+
+//export DecodeWithTTLC
+func DecodeWithTTLC(data *C.char, dataLen C.int, ttlSeconds C.longlong, result **C.char, resultLen *C.int) C.int {
+	goData := C.GoBytes(unsafe.Pointer(data), dataLen)
+	decoded, err := mb64.DecodeWithTTL(goData, time.Duration(ttlSeconds)*time.Second)
 	if err != nil {
 		return -1
 	}

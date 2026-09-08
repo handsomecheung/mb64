@@ -2,6 +2,8 @@ package mb64
 
 import (
 	"encoding/base64"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -176,6 +178,142 @@ func TestEncryptAndDecrypt(t *testing.T) {
 	}
 }
 
+func TestEncodeAndDecodeWithTTL(t *testing.T) {
+	key := "my-secret-key-123"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "secure message"
+
+	// 1. Valid TTL
+	encoded, err := Encode([]byte(content))
+	checkErr(t, err)
+
+	decoded, err := DecodeWithTTL(encoded, 10*time.Second)
+	checkErr(t, err)
+	if string(decoded) != content {
+		t.Errorf("got %s, want %s", string(decoded), content)
+	}
+
+	// 2. Decode with TTL = 0 (no expiration check)
+	decodedNoTTL, err := Decode(encoded)
+	checkErr(t, err)
+	if string(decodedNoTTL) != content {
+		t.Errorf("got %s, want %s", string(decodedNoTTL), content)
+	}
+}
+
+func TestTTL_Expired(t *testing.T) {
+	key := "my-secret-key-123"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "expired message"
+
+	// Encoded 10 seconds in the past
+	pastTime := time.Now().Add(-10 * time.Second)
+	encoded, err := EncodeWithTime([]byte(content), pastTime)
+	checkErr(t, err)
+
+	// TTL of 5 seconds should fail
+	_, err = DecodeWithTTL(encoded, 5*time.Second)
+	if !errors.Is(err, ErrExpired) {
+		t.Errorf("expected ErrExpired, got %v", err)
+	}
+
+	// TTL of 15 seconds should pass
+	decoded, err := DecodeWithTTL(encoded, 15*time.Second)
+	checkErr(t, err)
+	if string(decoded) != content {
+		t.Errorf("got %s, want %s", string(decoded), content)
+	}
+}
+
+func TestTTL_ClockSkew(t *testing.T) {
+	key := "my-secret-key-123"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "future message"
+
+	// Encoded far in the future (beyond clock skew limit)
+	futureTime := time.Now().Add(2 * time.Minute)
+	encoded, err := EncodeWithTime([]byte(content), futureTime)
+	checkErr(t, err)
+
+	_, err = DecodeWithTTL(encoded, 5*time.Minute)
+	if !errors.Is(err, ErrInvalidTimestamp) {
+		t.Errorf("expected ErrInvalidTimestamp, got %v", err)
+	}
+}
+
+func TestDateIndependence(t *testing.T) {
+	// Verify that key derivation does not depend on the current calendar date
+	key := "cross-date-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "persists across days"
+
+	// Encoded yesterday
+	yesterday := time.Now().Add(-24 * time.Hour)
+	encoded, err := EncodeWithTime([]byte(content), yesterday)
+	checkErr(t, err)
+
+	// Without TTL check (or with large TTL), it should decode successfully
+	decoded, err := Decode(encoded)
+	checkErr(t, err)
+	if string(decoded) != content {
+		t.Errorf("got %s, want %s", string(decoded), content)
+	}
+}
+
+func TestExtractTimestampFromCiphertext(t *testing.T) {
+	key := "verify-timestamp-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "Hello world timestamp test"
+	expectedTime := time.Date(2026, 9, 8, 14, 0, 0, 0, time.UTC)
+
+	// 1. Encode with a specific known timestamp
+	encoded, err := EncodeWithTime([]byte(content), expectedTime)
+	checkErr(t, err)
+
+	// 2. Extract prefix (first 8 Base64 characters)
+	if len(encoded) < 8 {
+		t.Fatalf("encoded string too short: %s", string(encoded))
+	}
+	prefix := encoded[:8]
+
+	// 3. Decode the 8 Base64 characters into binary (6 bytes)
+	var headerBuf [6]byte
+	n, err := mbEncoding.Decode(headerBuf[:], prefix)
+	checkErr(t, err)
+	if n < 4 {
+		t.Fatalf("decoded header too short, got %d bytes, want at least 4", n)
+	}
+
+	// 4. Extract 4-byte uint32 timestamp
+	tsUint := binary.BigEndian.Uint32(headerBuf[:4])
+	extractedTime := time.Unix(int64(tsUint), 0).UTC()
+
+	// 5. Compare with expected timestamp
+	if extractedTime.Unix() != expectedTime.Unix() {
+		t.Errorf("timestamp mismatch: got %v (unix: %d), want %v (unix: %d)",
+			extractedTime, extractedTime.Unix(), expectedTime, expectedTime.Unix())
+	}
+
+	// 6. Verify formatted time format (e.g. YYYY-MM-DD HH:MM:SS)
+	formattedTime := extractedTime.Format("2006-01-02 15:04:05")
+	if formattedTime != "2026-09-08 14:00:00" {
+		t.Errorf("formatted time mismatch: got %s, want 2026-09-08 14:00:00", formattedTime)
+	}
+
+	t.Logf("Successfully extracted timestamp: %s (unix: %d) from ciphertext prefix: %s",
+	formattedTime, tsUint, string(prefix))
+}
+
 func TestShuffle(t *testing.T) {
 	basekeys := []string{" ", "a", "abcd1234#$%"}
 	for _, basekey := range basekeys {
@@ -340,5 +478,146 @@ func BenchmarkShuffleStrARX(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		shuffleStr(input, numbers)
+	}
+}
+
+// Test 1: Test decrypting ciphertext created 2 minutes past expiration
+func TestDecodePastExpirationTimestamp(t *testing.T) {
+	key := "past-expiration-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "message expired 2 minutes ago"
+	ttl := 5 * time.Minute
+	// Created 7 minutes ago (2 minutes past the 5-minute TTL)
+	pastTime := time.Now().Add(-7 * time.Minute)
+
+	encoded, err := EncodeWithTime([]byte(content), pastTime)
+	checkErr(t, err)
+
+	// Case 1a: Decode without TTL check should succeed
+	decoded, err := Decode(encoded)
+	checkErr(t, err)
+	if string(decoded) != content {
+		t.Errorf("got %s, want %s", string(decoded), content)
+	}
+
+	// Case 1b: Decode with TTL check should fail with ErrExpired
+	_, err = DecodeWithTTL(encoded, ttl)
+	if !errors.Is(err, ErrExpired) {
+		t.Errorf("expected ErrExpired, got %v", err)
+	}
+}
+
+// Test 2: Test decrypting ciphertext created 2 minutes in the future (beyond clock skew)
+func TestDecodeFutureTimestamp(t *testing.T) {
+	key := "future-timestamp-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	content := "message from 2 minutes in the future"
+	// Created 2 minutes in the future (exceeds default 60s clock skew)
+	futureTime := time.Now().Add(2 * time.Minute)
+
+	encoded, err := EncodeWithTime([]byte(content), futureTime)
+	checkErr(t, err)
+
+	// Case 2a: Decode without TTL check should succeed
+	decoded, err := Decode(encoded)
+	checkErr(t, err)
+	if string(decoded) != content {
+		t.Errorf("got %s, want %s", string(decoded), content)
+	}
+
+	// Case 2b: Decode with TTL check should fail with ErrInvalidTimestamp (future clock skew)
+	_, err = DecodeWithTTL(encoded, 5*time.Minute)
+	if !errors.Is(err, ErrInvalidTimestamp) {
+		t.Errorf("expected ErrInvalidTimestamp, got %v", err)
+	}
+}
+
+// Test 3: Test ciphertext with invalid timestamp prefix fails to decrypt
+func TestDecodeInvalidTimestampPrefix(t *testing.T) {
+	key := "invalid-prefix-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	testCases := []struct {
+		name  string
+		input []byte
+	}{
+		{
+			name:  "Too short (less than 8 chars)",
+			input: []byte("abc"),
+		},
+		{
+			name:  "Non-Base64 characters in prefix",
+			input: []byte("!@#$%^&*()_+1234567890abcdefghijklmnopqrstuvwxyz"),
+		},
+		{
+			name:  "Base64 characters in prefix",
+			input: []byte("Qm9ybiBpbiBIYW1idXJnIHRvIGEgbXVzaWNhbCBmYW1pbHksIEJyYWhtcyBjb21wb3NlZCBhbmQgcGVyZm9ybWVkIGxvY2FsbHkgaW4gaGlzIHlvdXRoIGJlZm9yZSB0b3VyaW5nIENlbnRyYWwgRXVyb3BlIGFzIGEgcGlhbmlzdCwgcHJlbWllcmluZyBoaXMgb3duIHdvcmtzIGFuZCBtZWV0aW5nIEZyYW56IExpc3p0IGluIFdlaW1hci4K"),
+		},
+		{
+			name:  "Normal plaintext string",
+			input: []byte("Hello, this is a plain text message not encrypted by mb64!"),
+		},
+		{
+			name:  "Corrupted timestamp prefix",
+			input: []byte("@@@@@@@@1234567890abcdefghijklmnopqrstuvwxyz"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode(tc.input)
+			if err == nil {
+				t.Errorf("[%s] expected decode error for invalid input, got nil", tc.name)
+			}
+
+			_, errTTL := DecodeWithTTL(tc.input, 5*time.Minute)
+			if errTTL == nil {
+				t.Errorf("[%s] expected DecodeWithTTL error for invalid input, got nil", tc.name)
+			}
+		})
+	}
+}
+
+// Test 4: Iterate all uppercase and lowercase single letters and verify ciphertext length
+func TestSingleCharacterCiphertextLength(t *testing.T) {
+	key := "single-char-length-key"
+	err := SetEncoding(key)
+	checkErr(t, err)
+
+	// Expected length for 1-byte plaintext:
+	// Binary length = Nonce(12B) + Plaintext(1B) + AuthTag(16B) = 29 bytes.
+	// Base64 encoded length = ceil(29/3) * 4 = 10 * 4 = 40 characters (with 1 '=' padding).
+	const expectedLength = 40
+
+	var testChars []byte
+	for c := byte('A'); c <= byte('Z'); c++ {
+		testChars = append(testChars, c)
+	}
+	for c := byte('a'); c <= byte('z'); c++ {
+		testChars = append(testChars, c)
+	}
+
+	for _, ch := range testChars {
+		charStr := string([]byte{ch})
+		encoded, err := Encode([]byte(charStr))
+		checkErr(t, err)
+
+		// Verify encoded length is exactly 40 chars
+		if len(encoded) != expectedLength {
+			t.Errorf("character '%c': expected ciphertext length %d, got %d (ciphertext: %s)",
+				ch, expectedLength, len(encoded), string(encoded))
+		}
+
+		// Verify decode roundtrip
+		decoded, err := Decode(encoded)
+		checkErr(t, err)
+		if string(decoded) != charStr {
+			t.Errorf("character '%c': expected decrypted %s, got %s", ch, charStr, string(decoded))
+		}
 	}
 }
